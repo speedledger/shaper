@@ -1,5 +1,3 @@
-#!/usr/bin/env amm
-
 import ammonite.ops._
 import upickle.default.{macroRW, MapStringReader}
 import $file.src.{errors, types, template}
@@ -13,32 +11,33 @@ case class NoSuchShape(shape: String) extends Throwable
 case class CouldNotRealize(shape: String) extends Throwable
 case class InvalidShapeConfig(shape: String) extends Throwable
 
+lazy val cwd: Path = sys.env.get("CWD").map(cwd => Path(cwd)).getOrElse(pwd)
+
 @main
 def list() = {
-    val shapeStr = Shape.list(pwd)
+    val shapeStr = Shape.list(cwd)
         .map(_.baseName)
         .distinct
         .map(shapeName => s" - $shapeName")
         .mkString("\n")
-    System.out.println(s"Available shapes:\n${shapeStr}")
+    System.out.println(s"Available shapes in $cwd:\n${shapeStr}")
 }
 
 @main
 def realize(shape: String, params: Map[String, String] @doc("ex: foo=bar,apa=bepa") = Map.empty) = {
-    val wd = pwd
-    val allShapes = Shape.list(wd)
+    val allShapes = Shape.list(cwd)
     allShapes.filter(_.baseName == shape) match {
         case Seq(shapePath) =>
-            Shape.load(shapePath).flatMap(shape => shape.realize(wd, shape.conf.params.concat(params))) match {
+            Shape.load(shapePath).flatMap(shape => shape.realize(cwd, shape.conf.params.concat(params))) match {
                 case Left(UnrealizableFiles(files)) =>
                     val reasons = files.map {
                         case (path, reason) =>
-                            s" - ${path.relativeTo(pwd)}: \t$reason"
+                            s" - ${path.relativeTo(cwd)}: \t$reason"
                         }.mkString("\n")
                     System.err.println(s"Could not realize shape $shapePath\n$reasons")
                     throw CouldNotRealize(shape)
                 case Right(touchedFiles) =>
-                    val files = touchedFiles.map(file => s" - ${file.relativeTo(pwd)}").mkString("\n")
+                    val files = touchedFiles.map(file => s" - ${file.relativeTo(cwd)}").mkString("\n")
                     System.out.println(s"Touched the following files:\n$files")
             }
         case Seq() =>
@@ -51,14 +50,14 @@ def realize(shape: String, params: Map[String, String] @doc("ex: foo=bar,apa=bep
 @main
 def describe(shape: String) = {
     val shapeName = shape
-    val allShapes = Shape.list(pwd)
+    val allShapes = Shape.list(cwd)
     allShapes.filter(_.baseName == shape) match {
         case Seq(shapePath) =>
             Shape.load(shapePath) match {
                 case Right(shape) =>
                     System.out.println(shape.describe)
                 case Left(err) =>
-                    System.err.println(s"Could not load shape config ${shapePath.relativeTo(pwd)}:\n${ShapeError.describe(err)}")
+                    System.err.println(s"Could not load shape config ${shapePath.relativeTo(cwd)}:\n${ShapeError.describe(err)}")
                     throw InvalidShapeConfig(shapeName)
             }
         case Seq() =>
@@ -164,7 +163,7 @@ case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
         .sorted
         .map(path => s"  - $path")
         .mkString("\n")
-        s""" Location: ${loc.relativeTo(pwd)}
+        s""" Location: ${loc.relativeTo(cwd)}
            | Params:
            |$params
            | File templates:

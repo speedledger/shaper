@@ -3,6 +3,7 @@ import $file.types
 import errors._
 import types._
 
+import ammonite.ops._
 import scala.util.Try
 
 trait Template[T] {

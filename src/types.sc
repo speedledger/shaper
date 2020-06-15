@@ -1,3 +1,4 @@
+import ammonite.ops.RelPath
 import upickle.default._
 
 type Params = Map[String, String]

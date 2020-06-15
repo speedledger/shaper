@@ -1,6 +1,6 @@
 #!/usr/bin/env amm
 
-import ammonite.ops
+import ammonite.ops._
 import upickle.default.{macroRW, MapStringReader}
 import $file.src.{errors, types, template}
 import errors._
@@ -8,6 +8,65 @@ import types._
 import template._
 
 import scala.util.Try
+
+case class NoSuchShape(shape: String) extends Throwable
+case class CouldNotRealize(shape: String) extends Throwable
+case class InvalidShapeConfig(shape: String) extends Throwable
+
+@main
+def list() = {
+    val shapeStr = Shape.list(pwd)
+        .map(_.baseName)
+        .distinct
+        .map(shapeName => s" - $shapeName")
+        .mkString("\n")
+    System.out.println(s"Available shapes:\n${shapeStr}")
+}
+
+@main
+def realize(shape: String, params: Map[String, String] @doc("ex: foo=bar,apa=bepa") = Map.empty) = {
+    val wd = pwd
+    val allShapes = Shape.list(wd)
+    allShapes.filter(_.baseName == shape) match {
+        case Seq(shapePath) =>
+            Shape.load(shapePath).flatMap(shape => shape.realize(wd, shape.conf.params.concat(params))) match {
+                case Left(UnrealizableFiles(files)) =>
+                    val reasons = files.map {
+                        case (path, reason) =>
+                            s" - ${path.relativeTo(pwd)}: \t$reason"
+                        }.mkString("\n")
+                    System.err.println(s"Could not realize shape $shapePath\n$reasons")
+                    throw CouldNotRealize(shape)
+                case Right(touchedFiles) =>
+                    val files = touchedFiles.map(file => s" - ${file.relativeTo(pwd)}").mkString("\n")
+                    System.out.println(s"Touched the following files:\n$files")
+            }
+        case Seq() =>
+            System.err.println(s"No shape named $shape")
+            throw NoSuchShape(shape)
+    }
+
+}
+
+@main
+def describe(shape: String) = {
+    val shapeName = shape
+    val allShapes = Shape.list(pwd)
+    allShapes.filter(_.baseName == shape) match {
+        case Seq(shapePath) =>
+            Shape.load(shapePath) match {
+                case Right(shape) =>
+                    System.out.println(shape.describe)
+                case Left(err) =>
+                    System.err.println(s"Could not load shape config ${shapePath.relativeTo(pwd)}:\n${ShapeError.describe(err)}")
+                    throw InvalidShapeConfig(shapeName)
+            }
+        case Seq() =>
+            System.err.println(s"No shape named $shape")
+            throw NoSuchShape(shape)
+    }
+}
+
 
 object Shape {
     case class Conf(
@@ -23,6 +82,7 @@ object Shape {
                 upickle.default.read[Conf](read(shapeFile))
             }.toEither.left.map {
                 case _: java.nio.file.NoSuchFileException => NoShapeJsonFile(shapeFile)
+                case t: ujson.ParseException => CouldNotParseJson(shapeFile, t.toString)
             }
         }
     }
@@ -88,6 +148,30 @@ object Shape {
 case class ShapeTarget(source: Path, target: Path, op: TemplateOp)
 
 case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
+    def describe: String = {
+        val params = conf.params
+        .map {
+            case (key, defval) => s"  - $key (default: $defval)"
+        }
+        .toSeq
+        .sorted
+        .mkString("\n")
+        val fileNames = files.map(tfile => tfile.path.value)
+        .map {
+            case path if path.ext == "append" => s"A ${path / up / path.baseName}"
+            case path => s"C $path"
+        }
+        .sorted
+        .map(path => s"  - $path")
+        .mkString("\n")
+        s""" Location: ${loc.relativeTo(pwd)}
+           | Params:
+           |$params
+           | File templates:
+           |$fileNames
+           |""".stripMargin
+    }
+
     def realize(to: Path, params: Params): Either[ShapeError, Seq[Path]] = {
         for {
             _ <- validateTemplates(params)

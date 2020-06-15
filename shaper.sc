@@ -2,131 +2,61 @@
 
 import ammonite.ops
 import upickle.default.{macroRW, MapStringReader}
+import $file.src.{errors, types, template}
+import errors._
+import types._
+import template._
+
 import scala.util.Try
-
-sealed trait ShapeError
-object ShapeError {
-    def describe: ShapeError => String = {
-        case NoShapeJsonFile(where) => s"could not load $where for shape"
-        case UnrealizableFiles(files) => {
-            files.map {
-                case (file, reason) => s"${file.relativeTo(wd)}: \t$reason"
-            }.mkString("\n")
-        }
-        case t => s"could not realize shape: $t"
-    }
-}
-case class NoSuchShape(name: String) extends ShapeError
-case class NoShapeJsonFile(where: Path) extends ShapeError
-case class UnknownKeys(keys: Set[String]) extends ShapeError
-case class UnrealizableFile(file: Path, reason: String = "") extends ShapeError
-case class UnrealizableFiles(files: Map[Path, String]) extends ShapeError {
-    def updated(t: UnrealizableFile) = {
-        UnrealizableFiles(files.updated(t.file, t.reason))
-    }
-}
-case class UnknownError(t: Throwable) extends ShapeError
-
-implicit val relPathRW = upickle
-    .default
-    .readwriter[String]
-    .bimap[RelPath](
-        x => x.toString,
-        str => RelPath(str)
-    )
-
-case class TKey(value: String) extends AnyVal
-
-type Params = Map[TKey, String]
-
-trait Template[T] {
-    def value: T
-    def keys: Set[TKey] = {
-        keyPattern.findAllMatchIn(value.toString).map(_.group(1)).map(TKey.apply).toSet
-    }
-    def realize(params: Params): Either[ShapeError, T]
-}
-
-object Template {
-    val keyPattern = raw"\$$\{([^}]+)\}".r
-}
-
-case class TemplateString(value: String) extends Template[String] {
-    def realize(params: Params): Either[ShapeError, String] = {
-        for {
-            _ <- (keys -- params.keys) match {
-                case unknownKeys if unknownKeys.isEmpty => Right(())
-                case unknownKeys => Left(UnknownKeys(unknownKeys))
-            }
-            relString <- Try {
-                templatePattern.replaceAllIn(
-                    value,
-                    {
-                        case templatePattern(tag) =>
-                            params.get(tag).getOrElse(throw new Throwable(""))
-                    }
-                )
-            }.toEither.left.map(t => UnknownError(t))
-        } yield relString
-    }
-}
-
-case class TemplatePath(path: RelPath) extends Template[RelPath] {
-    templatePath.segments
-    .flatMap(segment => TemplatePath(segment).realize(params))
-    .partition(_.isRight) match {
-        case (_, badSegments) if badSegments.nonEmpty =>
-            badSegments.head.asInstanceOf[Either[ShapeError, RelPath]]
-        case (newSegments, _) =>
-            val newPath = newSegments.collect { case Right(s) => s }.mkString("/")
-            Right(RelPath(newPath))
-    }
-}
 
 object Shape {
     case class Conf(
-        params: Params,
-        ignore: Seq[RelPath]
+        params: Params = Map.empty,
+        ignore: Seq[RelPath] = Seq.empty
     )
+
     object Conf {
         implicit val rw = macroRW[Conf]
 
         def load(shapeFile: Path): Either[ShapeError, Shape.Conf] = {
             Try {
-                upickle.default.read[Shape.Conf](read(shapeFile))
+                upickle.default.read[Conf](read(shapeFile))
             }.toEither.left.map {
                 case _: java.nio.file.NoSuchFileException => NoShapeJsonFile(shapeFile)
             }
         }
     }
 
-    sealed trait TemplateType
-    object TemplateType {
-        case object Append extends TemplateType
-        case object NewFile extends TemplateType
-    }
-
     case class TemplateFile(
-        path: RelPath,
-        templateType: TemplateType,
-        params: Set[String]
+        path: TemplatePath,
+        op: TemplateOp,
+        keys: Set[String],
     )
 
-    def collectTemplateFiles(shapePath: Path, shapeConfig: Shape.Conf): Either[ShapeError, Seq[Shape.TemplateFile]] = {
+    def gatherTemplateKeys(path: Path): Either[ShapeError, Set[String]] = {
         Try {
-            ls.rec(shapePath)
+            read(path)
+        }.toEither
+         .left.map(t => UnreadableShapeFile(path, t.toString))
+         .map(TemplateString.apply)
+         .map(_.keys)
+    }
+
+    def collectTemplateFiles(where: Path, ignored: Seq[RelPath]): Either[ShapeError, Seq[TemplateFile]] = {
+        Try {
+            ls.rec(where)
                 .filterNot(_.isDir)
-                .map(path => path.relativeTo(shapePath))
+                .map(path => path.relativeTo(where))
                 .filter(_ != RelPath("shape.json"))
-                .filterNot(shapeConfig.ignore.contains)
+                .filterNot(ignored.contains)
                 .map {
-                    path => path -> identifyKeys(path.toString).concat(identifyKeys(read(shapePath / path)))
+                    path => gatherTemplateKeys(where / path).map(_.concat(TemplatePath(path).keys)).map(path -> _)
                 }
                 .map {
-                    case (path, params) if path.ext.equals("append") =>
-                        TemplateFile(path / up / path.baseName, TemplateType.Append, params)
-                    case (path, params) =>
-                        TemplateFile(path, TemplateType.NewFile, params)
+                    case Right((path, keys)) if path.ext.equals("append") =>
+                        TemplateFile(TemplatePath(path / up / path.baseName), TemplateOp.Append, keys)
+                    case Right((path, keys)) =>
+                        TemplateFile(TemplatePath(path), TemplateOp.NewFile, keys)
                 }
         }.toEither.left.map {
             case t: ShapeError => t
@@ -134,15 +64,12 @@ object Shape {
         }
     }
 
-    def load(shapePath: Path): Either[ShapeError, Shape] = {
-        val shapeFile = shapePath / "shape.json"
+    def load(shapeLoc: Path): Either[ShapeError, Shape] = {
         for {
-            shapeConfig <- Conf.load(shapeFile)
-            templateFiles <- collectTemplateFiles(shapePath, shapeConfig)
-            shape = Shape(shapePath, shapeConfig, templateFiles)
-        } yield shape
+            conf <- Conf.load(shapeLoc / "shape.json")
+            files <- collectTemplateFiles(shapeLoc, conf.ignore)
+        } yield Shape(shapeLoc, conf, files)
     }
-
 
     def list(where: Path): Seq[Path] = {
         Seq(
@@ -158,12 +85,97 @@ object Shape {
     }
 }
 
+case class ShapeTarget(source: Path, target: Path, op: TemplateOp)
+
+case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
+    def realize(to: Path, params: Params): Either[ShapeError, Seq[Path]] = {
+        for {
+            _ <- validateTemplates(params)
+            targets <- generateTargets(to, params)
+            _ <- targets.collect(invalidTargets) match {
+                case invalids if invalids.nonEmpty =>
+                    Left(
+                        invalids.fold(UnrealizableFiles(Map.empty)) {
+                            case (acc: UnrealizableFiles, err: UnrealizableFile) =>
+                                acc.updated(err)
+                        })
+                case _ => Right(())
+            }
+            files <- targets.map(realizeTarget(params)).partition(_.isRight) match {
+                case (_, errors) if errors.nonEmpty =>
+                    Left(UnrealizableFiles(errors.map {
+                        case Left(UnrealizableFile(path, reason)) => path -> reason
+                    }.toMap))
+                case (paths, _) => Right(paths.collect { case Right(path) => path })
+            }
+        } yield files
+    }
+
+    def validateTemplates(params: Params): Either[ShapeError, Unit] = {
+        val paramKeys = params.keys
+        files
+            .map(file => file -> (file.keys -- paramKeys))
+            .filter(_._2.size > 0)
+            .map {
+                case (file, excessKeys) =>
+                    (loc / file.path.value) -> s"missing keys: ${excessKeys.mkString(",")}"
+            } match {
+                case errors if errors.nonEmpty => Left(UnrealizableFiles(errors.toMap))
+                case _ => Right(())
+            }
+    }
+
+    def generateTargets(to: Path, params: Params): Either[ShapeError, Seq[ShapeTarget]] = {
+        files.map(file => (
+                file.path.realize(params).map { realizedPath => to / realizedPath},
+                (loc / file.path.value),
+                file.op
+            )
+        ).partition(_._1.isRight) match {
+            case (_, errors) =>
+                Left(errors.map {
+                    case (Left(t: ShapeError), _, _) => t
+                    case (Left(t: Throwable), source, _) => UnrealizableFile(source, s"could not realize file $t")
+                }.fold(UnrealizableFiles(Map.empty)) {
+                    case (acc: UnrealizableFiles, err: UnrealizableFile) =>
+                        acc.updated(err)
+                })
+            case (successes, _) =>
+                Right(successes.collect {
+                    case (Right(target), source, op) => ShapeTarget(target, source, op)
+                })
+        }
+    }
+
+    def invalidTargets: PartialFunction[ShapeTarget, UnrealizableFile] = {
+        case ShapeTarget(target, source, TemplateOp.NewFile) if exists(target) =>
+            UnrealizableFile(source, s"$target already exists")
+        case ShapeTarget(target, source, TemplateOp.Append) if !exists(target) =>
+            UnrealizableFile(source, s"$target does not exist")
+    }
+
+    def realizeTarget(params: Params): ShapeTarget => Either[ShapeError, Path] = {
+        case ShapeTarget(target, source, TemplateOp.NewFile) =>
+            Try(read(source)).toEither
+                .left.map(t => UnrealizableFile(source, s"could not read source ${t.toString}"))
+                .map(TemplateString.apply)
+                .flatMap(_.realize(params))
+                .flatMap(content =>
+                    Try(write(target, content, createFolders=true))
+                        .toEither
+                        .left.map(t => UnrealizableFile(source, s"could not read source ${t.toString}"))
+                        .map(_ => target)
+                )
+    }
+}
+
+/*
 case class Shape(
     srcLoc: Path,
     conf: Shape.Conf,
     templates: Seq[Shape.TemplateFile]
 ) {
-    type RealizedPath = (Path, Path, Shape.TemplateType)
+    type RealizedPath = (Path, Path, TemplateOps)
 
     def validateTemplateKeys: Shape.TemplateFile => Either[UnrealizableFile, Unit] = {
         case Shape.TemplateFile(_, _, params) if params.subsetOf(conf.params.keys.toSet) => Right(())
@@ -177,7 +189,7 @@ case class Shape(
             realizePath(path, conf.params)
                 .map { realPath =>
                     val sourcePath = templateType match {
-                        case Shape.TemplateType.Append => srcLoc / RelPath(path.toString ++ ".append")
+                        case TemplateOps.Append => srcLoc / RelPath(path.toString ++ ".append")
                         case _ => srcLoc / path
                     }
                     (targetLoc / realPath, sourcePath, templateType)
@@ -189,9 +201,9 @@ case class Shape(
     }
 
     def validateTargetPath: RealizedPath => Either[UnrealizableFile, Unit] = {
-        case (targetPath, sourcePath, Shape.TemplateType.NewFile) if exists(targetPath) =>
+        case (targetPath, sourcePath, TemplateOps.NewFile) if exists(targetPath) =>
             Left(UnrealizableFile(sourcePath, s"$targetPath already exists"))
-        case (targetPath, sourcePath, Shape.TemplateType.Append) if !exists(targetPath) =>
+        case (targetPath, sourcePath, TemplateOps.Append) if !exists(targetPath) =>
             Left(UnrealizableFile(sourcePath, s"$targetPath does not exist"))
         case _ =>
             Right(())
@@ -226,13 +238,13 @@ case class Shape(
         }
     }
 
-    def writeTargetFile(op: Shape.TemplateType)(content: String, path: Path): Either[ShapeError, Unit] = {
+    def writeTargetFile(op: TemplateOps)(content: String, path: Path): Either[ShapeError, Unit] = {
         op match {
-            case Shape.TemplateType.NewFile =>
+            case TemplateOps.NewFile =>
                 Try(write(path, content)).toEither.left.map {
                     case t: Throwable => UnknownError(t)
                 }
-            case Shape.TemplateType.Append =>
+            case TemplateOps.Append =>
                 Try(write.append(path, content)).toEither.left.map {
                     case t: Throwable => UnknownError(t)
                 }
@@ -310,3 +322,4 @@ def testRealizeString(): Unit = {
         case (desc, (a, b)) => if (realizeString(a, params) == b) { () } else { throw new Throwable(desc) }
     }
 }
+*/

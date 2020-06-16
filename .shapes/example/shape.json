@@ -1,0 +1,8 @@
+{
+    "params": {
+        "name": "Example Name",
+        "slug": "example-name",
+        "version": "v0.1.0"
+    },
+    "ignore": ["README"]
+}

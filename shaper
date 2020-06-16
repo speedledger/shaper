@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# This script runs `shaper.sc` with the correct executional context so that it
+# is able to load its dependencies.
+
 TARGET_FILE=$0
 export CWD=`pwd -P`
 

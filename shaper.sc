@@ -49,7 +49,7 @@ def realize(shape: String, params: Map[String, String] = Map.empty, stdin: Boole
                         case (path, reason) =>
                             s" - ${path.relativeTo(cwd)}: \t$reason"
                         }.mkString("\n")
-                    System.err.println(s"Could not realize shape $shapePath\n$reasons")
+                    System.err.println(s"Could not realize shape ${shapePath.relativeTo(cwd)}\n$reasons")
                     throw CouldNotRealize(shape)
                 case Right(touchedFiles) =>
                     val files = touchedFiles.map(file => s" - ${file.relativeTo(cwd)}").mkString("\n")
@@ -255,9 +255,9 @@ case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
 
     def invalidTargets: PartialFunction[ShapeTarget, UnrealizableFile] = {
         case ShapeTarget(source, target, TemplateOp.NewFile) if exists(target) =>
-            UnrealizableFile(source, s"$target already exists")
+            UnrealizableFile(source, s"${target.relativeTo(cwd)} already exists")
         case ShapeTarget(source, target, TemplateOp.Append) if !exists(target) =>
-            UnrealizableFile(source, s"$target does not exist")
+            UnrealizableFile(source, s"${target.relativeTo(cwd)} does not exist")
     }
 
     def readSource: ShapeTarget => Either[ShapeError, TemplateString] = {
@@ -271,11 +271,11 @@ case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
         case ShapeTarget(source, target, TemplateOp.NewFile) =>
             Try(write(target, content, createFolders=true))
                 .toEither
-                .left.map(t => UnrealizableFile(source, s"could not write target $target: ${t.toString}"))
+                .left.map(t => UnrealizableFile(source, s"could not write target ${target.relativeTo(cwd)}: ${t.toString}"))
         case ShapeTarget(source, target, TemplateOp.Append) =>
             Try(write.append(target, content))
                 .toEither
-                .left.map(t => UnrealizableFile(source, s"could not update target $target: ${t.toString}"))
+                .left.map(t => UnrealizableFile(source, s"could not update target ${target.relativeTo(cwd)}: ${t.toString}"))
     }
 
     def realizeTarget(params: Params, shapeTarget: ShapeTarget): Either[ShapeError, Path] = {

@@ -6,6 +6,14 @@ file additions in existing projects. A "shape" is defined in the project roots
 replacement and a `shape.json` that describes default parameters and files to
 ignore.
 
+## Installing
+
+```sh
+> make install
+```
+
+By default the project is installed to `~/.local/bin` but this can be changed by passing in a different `PREFIX` to make. The name of the resulting binary can also be altered by passing in an argument for `EXECUTABLE`.
+
 ## Usage
 
 Listing all available shapes is done with the `list` command.

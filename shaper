@@ -19,4 +19,4 @@ done
 PHYS_DIR=`pwd -P`
 RESULT=$PHYS_DIR
 
-amm $RESULT/shaper.sc $*
+amm --no-home-predef --thin $RESULT/shaper.sc $*

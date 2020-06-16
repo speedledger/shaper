@@ -1,3 +1,4 @@
+import $ivy.`com.lihaoyi::upickle:0.9.5`
 import ammonite.ops.RelPath
 import upickle.default._
 

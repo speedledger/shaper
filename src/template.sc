@@ -28,7 +28,7 @@ trait Template[T] {
 }
 
 object Template {
-    val keyPattern = raw"\$$\{([^}]+)\}".r
+    val keyPattern = raw"\$$\{([a-zA-Z0-9]+)\}".r
 }
 
 case class TemplateString(value: String) extends Template[String] {

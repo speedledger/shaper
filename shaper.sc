@@ -1,3 +1,4 @@
+import scala.annotation.tailrec
 import ammonite.ops._
 import upickle.default.{macroRW, MapStringReader}
 import $file.src.{errors, types, template}
@@ -23,12 +24,26 @@ def list() = {
     System.out.println(s"Available shapes in $cwd:\n${shapeStr}")
 }
 
+@tailrec
+def readStdin(buffer: Seq[String] = Seq.empty): String = {
+    Option(scala.io.StdIn.readLine()) match {
+        case Some(line) => readStdin(buffer :+ line)
+        case None => buffer.mkString("\n")
+    }
+}
+
 @main
-def realize(shape: String, params: Map[String, String] @doc("ex: foo=bar,apa=bepa") = Map.empty) = {
+def realize(shape: String, params: Map[String, String] = Map.empty, stdin: Boolean = false) = {
     val allShapes = Shape.list(cwd)
+    val extraParams = if (stdin) {
+        upickle.default.read[Map[String, String]](readStdin())
+    } else {
+        Map.empty
+    }
+    val inputParams = extraParams.concat(params)
     allShapes.filter(_.baseName == shape) match {
         case Seq(shapePath) =>
-            Shape.load(shapePath).flatMap(shape => shape.realize(cwd, shape.conf.params.concat(params))) match {
+            Shape.load(shapePath).flatMap(shape => shape.realize(cwd, shape.conf.params.concat(inputParams))) match {
                 case Left(UnrealizableFiles(files)) =>
                     val reasons = files.map {
                         case (path, reason) =>
@@ -79,9 +94,9 @@ object Shape {
         def load(shapeFile: Path): Either[ShapeError, Shape.Conf] = {
             Try {
                 upickle.default.read[Conf](read(shapeFile))
-            }.toEither.left.map {
-                case _: java.nio.file.NoSuchFileException => NoShapeJsonFile(shapeFile)
-                case t: ujson.ParseException => CouldNotParseJson(shapeFile, t.toString)
+            }.toEither.left.flatMap {
+                case _: java.nio.file.NoSuchFileException => Right(Conf())
+                case t: ujson.ParseException => Left(CouldNotParseJson(shapeFile, t.toString))
             }
         }
     }
@@ -148,9 +163,11 @@ case class ShapeTarget(source: Path, target: Path, op: TemplateOp)
 
 case class Shape(loc: Path, conf: Shape.Conf, files: Seq[Shape.TemplateFile]) {
     def describe: String = {
-        val params = conf.params
+        val allParams = files.flatMap(_.keys).concat(conf.params.keys).toSet
+        val params = allParams
         .map {
-            case (key, defval) => s"  - $key (default: $defval)"
+            case key if conf.params.contains(key) => s"  - $key (default: ${conf.params(key)})"
+            case key => s"  - $key"
         }
         .toSeq
         .sorted

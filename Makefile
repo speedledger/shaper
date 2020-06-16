@@ -3,6 +3,8 @@ SHARED=${PREFIX}/share/shaper
 BIN=${PREFIX}/bin
 EXECUTABLE?=shaper
 BUILDDIR?=_build
+TAG=$(shell git describe --tags)
+AUTHOR?="Krister Svanlund \<krister.svanlund@visma.com\>"
 
 .PHONY: install uninstall
 
@@ -51,7 +53,10 @@ ifneq "${BUILDDIR}" ""
 	mkdir -p '${BUILDDIR}/share/shaper'
 	cp -r shaper shaper.sc src README.md '${BUILDDIR}/share/shaper'
 	cd ${BUILDDIR}/bin && ln -s ../share/shaper/shaper ${EXECUTABLE}
-	tar -cjvf shaper.tar.bz2 -C ${BUILDDIR} .
+	echo "val binary = \"${EXECUTABLE}\"" > ${BUILDDIR}/share/shaper/src/release.sc
+	echo "val version = \"${TAG}\"" >> ${BUILDDIR}/share/shaper/src/release.sc
+	echo "val author = \"${AUTHOR}\"" >> ${BUILDDIR}/share/shaper/src/release.sc
+	tar -cjvf shaper-${TAG}.tar.bz2 -C ${BUILDDIR} .
 	rm -r ${BUILDDIR}
 else
 	@echo "Can not create package with empty BUILDDIR"

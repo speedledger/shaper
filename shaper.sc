@@ -1,7 +1,7 @@
 import scala.annotation.tailrec
 import ammonite.ops._
 import upickle.default.{macroRW, MapStringReader}
-import $file.src.{errors, types, template}
+import $file.src.{errors, types, template, release}
 import errors._
 import types._
 import template._
@@ -13,6 +13,11 @@ case class CouldNotRealize(shape: String) extends Throwable
 case class InvalidShapeConfig(shape: String) extends Throwable
 
 lazy val cwd: Path = sys.env.get("CWD").map(cwd => Path(cwd)).getOrElse(pwd)
+
+@main
+def version() = {
+    System.out.println(s"${release.binary} ${release.version} by ${release.author}")
+}
 
 @main
 def list() = {

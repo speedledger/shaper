@@ -2,6 +2,7 @@ PREFIX?=${HOME}/.local
 SHARED=${PREFIX}/share/shaper
 BIN=${PREFIX}/bin
 EXECUTABLE?=shaper
+BUILDDIR?=_build
 
 .PHONY: install uninstall
 
@@ -42,4 +43,16 @@ endif
 else
 	@echo "Incorrectly set PREFIX"
 	@exit 1
+endif
+
+pack:
+ifneq "${BUILDDIR}" ""
+	mkdir -p '${BUILDDIR}/bin'
+	mkdir -p '${BUILDDIR}/share/shaper'
+	cp -r shaper shaper.sc src README.md '${BUILDDIR}/share/shaper'
+	cd ${BUILDDIR}/bin && ln -s ../share/shaper/shaper ${EXECUTABLE}
+	tar -cjvf shaper.tar.bz2 -C ${BUILDDIR} .
+	rm -r ${BUILDDIR}
+else
+	@echo "Can not create package with empty BUILDDIR"
 endif

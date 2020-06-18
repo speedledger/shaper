@@ -1,4 +1,4 @@
-# Shaper - Super simple templAter
+# Shaper
 
 Shaper is a command line tool that helps bootstrapping simple, but repetative,
 file additions in existing projects. A "shape" is defined in the project roots
@@ -12,7 +12,9 @@ ignore.
 > make install
 ```
 
-By default the project is installed to `~/.local/bin` but this can be changed by passing in a different `PREFIX` to make. The name of the resulting binary can also be altered by passing in an argument for `EXECUTABLE`.
+By default the project is installed to `~/.local` but this can be changed by
+passing in a different `PREFIX` to make. The name of the resulting binary can
+also be altered by passing in an argument for `EXECUTABLE`.
 
 ## Usage
 
@@ -31,24 +33,32 @@ under the `"params"` key. More parameters can be specified by piping in
 json-content when calling `realize` with `--stdin true` and the the `--params`
 argument.
 
-#### Limitations:
-
-* Parameters given with `--params` can not contain spaces or other characters
-  that need escaping.
+> #### Limitations
+>
+> Parameters given with `--params` can not contain spaces or other characters
+> that need escaping.
 
 ## Creating a Shape
 
-* Create a directory with the shapes name in `.shapes/`
-* Create a new file in the shape directory called `shape.json` containing:
-  * `"params"` - A object with only string values of each parameter used in the
+- Create a directory with the shapes name in `.shapes/`
+
+- Create a new file in the shape directory called `shape.json` containing:
+
+  - `"params"` - A object with only string values of each parameter used in the
     template.
-  * `"ignore"` - A list of strings of file paths that should not be included
+
+  - `"ignore"` - A list of strings of file paths that should not be included
     in the realization of the template.
-* Create all the files with placeholders for param substitution
-  * The placeholder syntax is `${keyName}` where `keyName` will be looked up in
+
+- Create all the files with placeholders for param substitution
+
+  - The placeholder syntax is `${keyName}` where `keyName` will be looked up in
     the params.
-  * Keyword replacement in paths look the same as in the file content.
-  * Keys can only contain alphanumerical values (`a-zA-Z0-9`).
-  * Template files with the suffix `.append` will not create a new file but
+
+  - Keyword replacement in paths look the same as in the file content.
+
+  - Keys can only contain alphanumerical values (`a-zA-Z0-9`).
+
+  - Template files with the suffix `.append` will not create a new file but
     instead expects and existing file that it can append the content of the
     template to.

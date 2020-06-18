@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "checkBlanks": true,
+    "looseTable": false,
+    "spacedTable": true,
+    "listItemIndent": "1"
+  },
+  "plugins": [
+    "preset-lint-markdown-style-guide",
+    "lint-list-item-spacing",
+    ["lint-table-cell-padding", "padded"],
+    ["lint-list-item-indent", "space"],
+    ["lint-emphasis-marker", "_"],
+    ["lint-ordered-list-marker-value", "ordered"],
+    ["lint-no-file-name-irregular-characters", "\\.A-Za-z0-9_"]
+  ]
+}

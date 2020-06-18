@@ -6,6 +6,10 @@ import types._
 import ammonite.ops._
 import scala.util.Try
 
+object Template {
+    val keyPattern = raw"(.|)\$$\{(\w+)\}".r
+}
+
 trait Template[T] {
     import Template._
 
@@ -14,8 +18,29 @@ trait Template[T] {
     lazy val keys: Set[String] =
         keyPattern
             .findAllMatchIn(value.toString)
-            .map(_.group(1))
+            .map(m => m.group(1) -> m.group(2))
+            .collect {
+                case (notSlash, key) if notSlash != "\\" => key
+            }
             .toSet
+
+    def escapeResult(input: String): String = {
+        input.replaceAll("\\$", "\\\\\\$")
+    }
+
+    def replace(input: String, params: Params): Either[ShapeError, String] = {
+        check(params)
+            .map(_ =>
+                keyPattern.replaceAllIn(
+                    input, {
+                        case keyPattern("\\", tag) =>
+                            escapeResult(s"$${$tag}")
+                        case keyPattern(p, tag) =>
+                            escapeResult(s"$p${params(tag)}")
+                    }
+                )
+            )
+    }
 
     def check(params: Params): Either[ShapeError, Unit] = {
         (keys -- params.keys) match {
@@ -27,27 +52,8 @@ trait Template[T] {
     def realize(params: Params): Either[ShapeError, T]
 }
 
-object Template {
-    val keyPattern = raw"\$$\{([a-zA-Z0-9]+)\}".r
-}
-
 case class TemplateString(value: String) extends Template[String] {
-    import Template._
-
-    def realize(params: Params): Either[ShapeError, String] = {
-        for {
-            _ <- check(params)
-            relString <- Try {
-                keyPattern.replaceAllIn(
-                    value,
-                    {
-                        case keyPattern(tag) =>
-                            params.get(tag).getOrElse(throw new Throwable(""))
-                    }
-                )
-            }.toEither.left.map(t => UnknownError(t))
-        } yield relString
-    }
+    override def realize(params: Params): Either[ShapeError,String] = replace(value.toString, params).map(_.toString)
 }
 
 case class TemplatePath(value: RelPath) extends Template[RelPath] {
